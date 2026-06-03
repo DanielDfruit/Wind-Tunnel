@@ -1,0 +1,191 @@
+solid vehicle_block
+  facet normal 0 0 1
+    outer loop
+      vertex -1.2 -0.4 0
+      vertex 1.2 -0.4 0
+      vertex 1.2 0.4 0
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex -1.2 -0.4 0
+      vertex 1.2 0.4 0
+      vertex -1.2 0.4 0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex -1.2 -0.4 0.35
+      vertex -1.2 0.4 0.35
+      vertex 0.35 0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex -1.2 -0.4 0.35
+      vertex 0.35 0.4 0.35
+      vertex 0.35 -0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex 0.35 -0.4 0.75
+      vertex 0.95 -0.4 0.75
+      vertex 0.95 0.4 0.75
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex 0.35 -0.4 0.75
+      vertex 0.95 0.4 0.75
+      vertex 0.35 0.4 0.75
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex 1.2 -0.4 0.35
+      vertex 1.2 0.4 0.35
+      vertex 1.2 0.4 0
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex 1.2 -0.4 0.35
+      vertex 1.2 0.4 0
+      vertex 1.2 -0.4 0
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex -1.2 -0.4 0
+      vertex -1.2 -0.4 0.35
+      vertex 0.35 -0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex -1.2 -0.4 0
+      vertex 0.35 -0.4 0.35
+      vertex 1.2 -0.4 0
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 1.2 -0.4 0
+      vertex 0.35 -0.4 0.35
+      vertex 0.35 -0.4 0.75
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 1.2 -0.4 0
+      vertex 0.35 -0.4 0.75
+      vertex 0.95 -0.4 0.75
+    endloop
+  endfacet
+  facet normal 0 1 -0
+    outer loop
+      vertex 1.2 -0.4 0
+      vertex 0.95 -0.4 0.75
+      vertex 1.2 -0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 1.2 0.4 0
+      vertex 1.2 0.4 0.35
+      vertex 0.95 0.4 0.75
+    endloop
+  endfacet
+  facet normal 0.948683 0 0.316228
+    outer loop
+      vertex 1.2 0.4 0
+      vertex 0.95 0.4 0.75
+      vertex 0.95 -0.4 0.75
+    endloop
+  endfacet
+  facet normal 0.826082 0.225882 0.516301
+    outer loop
+      vertex 1.2 0.4 0
+      vertex 0.95 -0.4 0.75
+      vertex 1.2 -0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -1.2 0.4 0
+      vertex 1.2 0.4 0
+      vertex 1.2 0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -1.2 0.4 0
+      vertex 1.2 0.4 0.35
+      vertex 0.35 0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -1.2 0.4 0
+      vertex 0.35 0.4 0.35
+      vertex -1.2 0.4 0.35
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex -1.2 -0.4 0.35
+      vertex -1.2 -0.4 0
+      vertex -1.2 0.4 0
+    endloop
+  endfacet
+  facet normal 1 -0 0
+    outer loop
+      vertex -1.2 -0.4 0.35
+      vertex -1.2 0.4 0
+      vertex -1.2 0.4 0.35
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 0.35 -0.4 0.35
+      vertex 0.35 0.4 0.35
+      vertex 0.35 0.4 0.75
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 0.35 -0.4 0.35
+      vertex 0.35 0.4 0.75
+      vertex 0.35 -0.4 0.75
+    endloop
+  endfacet
+  facet normal -0.847998 0 -0.529999
+    outer loop
+      vertex 0.95 -0.4 0.75
+      vertex 0.95 0.4 0.75
+      vertex 1.2 0.4 0.35
+    endloop
+  endfacet
+  facet normal -0.847998 0 -0.529999
+    outer loop
+      vertex 0.95 -0.4 0.75
+      vertex 1.2 0.4 0.35
+      vertex 1.2 -0.4 0.35
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 0.35 0.4 0.35
+      vertex 1.2 0.4 0.35
+      vertex 0.95 0.4 0.75
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 0.35 0.4 0.35
+      vertex 0.95 0.4 0.75
+      vertex 0.35 0.4 0.75
+    endloop
+  endfacet
+endsolid vehicle_block
