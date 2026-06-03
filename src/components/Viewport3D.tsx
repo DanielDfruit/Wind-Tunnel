@@ -20,6 +20,8 @@ import { airSpeedToMs, particleCountForQuality } from '../utils/units';
 import { createParticles, stepParticles, type Particle } from '../simulation/particleSystem';
 import {
   ensureWebGpuDevice,
+  getLbmGpuGeneration,
+  isFlowSolverBusy,
   scheduleFlowSolverRebuild,
   refineFlowSolverLive,
 } from '../simulation/solverBackends';
@@ -128,7 +130,10 @@ function DemoMesh({ id }: { id: DemoObjectId }) {
 
 export interface ImportReadyMeta {
   vertexCount: number;
+  initialVertexCount: number;
   heavyMesh: boolean;
+  massiveMesh: boolean;
+  importTier: 'normal' | 'heavy' | 'massive';
   meshSimplified: boolean;
 }
 
@@ -182,7 +187,10 @@ function ImportedModel({
             if (cancelled) return;
             onReadyRef.current({
               vertexCount: loaded.vertexCount,
+              initialVertexCount: loaded.initialVertexCount,
               heavyMesh: loaded.heavyMesh,
+              massiveMesh: loaded.massiveMesh,
+              importTier: loaded.importTier,
               meshSimplified: loaded.meshSimplified,
             });
           });
@@ -369,6 +377,7 @@ function SceneInner({
   const toggles = useSimulationStore((s) => s.toggles);
   const demoId = useSimulationStore((s) => s.demoId);
   const importPayload = useSimulationStore((s) => s.importPayload);
+  const importLoading = useSimulationStore((s) => s.importLoading);
   const setModelInfo = useSimulationStore((s) => s.setModelInfo);
   const tickSimulation = useSimulationStore((s) => s.tickSimulation);
   const solverMode = useSimulationStore((s) => s.solverMode);
@@ -384,6 +393,7 @@ function SceneInner({
   const solverSigRef = useRef('');
   const modelReadyRef = useRef(true);
   const heavyModelRef = useRef(false);
+  const importTierRef = useRef<'std' | 'heavy' | 'massive'>('std');
   const [heavyModel, setHeavyModel] = useState(false);
   const boundsBoxRef = useRef(new THREE.Box3());
   const boundsDirtyRef = useRef(true);
@@ -409,11 +419,13 @@ function SceneInner({
       modelReadyRef.current = true;
       setHeavyModel(false);
       heavyModelRef.current = false;
+      importTierRef.current = 'std';
       return;
     }
     modelReadyRef.current = false;
     setHeavyModel(false);
     heavyModelRef.current = false;
+    importTierRef.current = 'std';
   }, [importPayload?.loadId]);
 
   const windVec = useMemo(() => windFromYawPitch(wind.yaw, wind.pitch), [wind.yaw, wind.pitch]);
@@ -462,16 +474,21 @@ function SceneInner({
   const handleImportReady = useCallback(
     (meta: ImportReadyMeta) => {
       modelReadyRef.current = true;
-      heavyModelRef.current = meta.heavyMesh;
-      setHeavyModel(meta.heavyMesh);
+      heavyModelRef.current = meta.heavyMesh || meta.massiveMesh;
+      importTierRef.current =
+        meta.importTier === 'massive' ? 'massive' : meta.importTier === 'heavy' ? 'heavy' : 'std';
+      setHeavyModel(heavyModelRef.current);
       setImportLoading(false);
       solverSigRef.current = '';
       boundsDirtyRef.current = true;
 
-      if (meta.heavyMesh) {
-        setSolverMode('lbm');
-        setEnv({ vizQuality: 'low', particleDensity: 0.35 });
-        setToggles({ streamlines: false });
+      if (meta.massiveMesh || meta.heavyMesh) {
+        setSolverMode('visual');
+        setEnv({
+          vizQuality: 'low',
+          particleDensity: meta.massiveMesh ? 0.18 : 0.26,
+        });
+        setToggles({ streamlines: false, particles: true });
       }
 
       requestAnimationFrame(() => {
@@ -488,6 +505,9 @@ function SceneInner({
             boundingBox: box.clone(),
             heavyMesh: meta.heavyMesh,
             vertexCount: meta.vertexCount,
+            initialVertexCount: meta.initialVertexCount,
+            massiveMesh: meta.massiveMesh,
+            importTier: meta.importTier,
             meshSimplified: meta.meshSimplified,
           });
         }
@@ -551,9 +571,7 @@ function SceneInner({
   useFrame((_, delta) => {
     if (!modelRef.current) return;
     frameCounter.current++;
-    const recomputeBounds =
-      boundsDirtyRef.current ||
-      frameCounter.current % (heavyModelRef.current ? 24 : 8) === 0;
+    const recomputeBounds = boundsDirtyRef.current;
     if (recomputeBounds) {
       boundsBoxRef.current.copy(computeWorldBounds(modelRef.current));
       boundsDirtyRef.current = false;
@@ -569,17 +587,17 @@ function SceneInner({
 
     timeRef.current += delta;
 
+    const boundsRevision = `${demoId}-${importPayload?.loadId ?? 'demo'}-${env.objectScale}`;
     const sig = [
       solverMode,
-      demoId,
-      importPayload?.name ?? '',
+      boundsRevision,
       env.vizQuality,
       env.airDensity,
       env.dynamicViscosity,
       wind.yaw,
       wind.pitch,
-      box.min.toArray().join(','),
-      box.max.toArray().join(','),
+      getLbmGpuGeneration(),
+      importTierRef.current,
     ].join('|');
     if (!modelReadyRef.current) return;
 
@@ -594,10 +612,16 @@ function SceneInner({
         () => {
           solverSigRef.current = sig;
           refreshSolverInfo();
-        }
+        },
+        importTierRef.current
       );
-    } else if (solverMode === 'lbm' || solverMode === 'potential') {
-      refineFlowSolverLive(solverMode === 'lbm' ? 4 : 1);
+    } else if (
+      !importLoading &&
+      !isFlowSolverBusy() &&
+      (solverMode === 'lbm' || solverMode === 'potential')
+    ) {
+      const lbmIters = heavyModelRef.current ? 1 : env.vizQuality === 'ultra' ? 3 : 2;
+      refineFlowSolverLive(solverMode === 'lbm' ? lbmIters : 1);
     }
 
     const metrics = stepParticles(particlesRef.current, windVec, center, radius, delta, {
@@ -654,7 +678,7 @@ function SceneInner({
   });
 
   const boundsRevision = `${demoId}-${importPayload?.loadId ?? 'demo'}-${env.objectScale}`;
-  const boundsThrottle = heavyModel ? 24 : 8;
+  const boundsThrottle = heavyModel ? 48 : 12;
 
   return (
     <>
@@ -752,8 +776,10 @@ export function Viewport3D({
         onCreated={({ gl }) => {
           gl.setClearColor('#0a0e14');
           canvasRef.current = gl.domElement;
-          void ensureWebGpuDevice().then(() => {
-            useSimulationStore.getState().refreshSolverInfo();
+          void ensureWebGpuDevice().then((st) => {
+            if (st === 'ready') {
+              useSimulationStore.getState().refreshSolverInfo();
+            }
           });
         }}
       >

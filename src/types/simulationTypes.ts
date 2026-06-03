@@ -55,6 +55,8 @@ export interface ImportPayload extends ImportPayloadInput {
   loadId: number;
 }
 
+export type MeshImportTier = 'normal' | 'heavy' | 'massive';
+
 export interface LoadedModel {
   object: THREE.Object3D;
   bounds: THREE.Box3;
@@ -62,8 +64,11 @@ export interface LoadedModel {
   characteristicLength: number;
   frontalAreaProxy: number;
   vertexCount: number;
+  initialVertexCount: number;
   meshSimplified: boolean;
   heavyMesh: boolean;
+  massiveMesh: boolean;
+  importTier: MeshImportTier;
 }
 
 export interface ModelInfo {
@@ -75,7 +80,10 @@ export interface ModelInfo {
   characteristicLength: number;
   boundingBox: THREE.Box3 | null;
   vertexCount?: number;
+  initialVertexCount?: number;
   heavyMesh?: boolean;
+  massiveMesh?: boolean;
+  importTier?: MeshImportTier;
   meshSimplified?: boolean;
 }
 

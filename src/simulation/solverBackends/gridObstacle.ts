@@ -58,7 +58,7 @@ export function buildObstacleGrid(
 
   const meshes = collectVisibleMeshes(object)
   const { meshCount, vertexCount } = countMeshComplexity(object)
-  const useCoarseObstacle = meshCount > 24 || vertexCount > 80_000
+  const useCoarseObstacle = meshCount > 6 || vertexCount > 12_000
   const obstacleBoxes: THREE.Box3[] = []
 
   if (useCoarseObstacle) {

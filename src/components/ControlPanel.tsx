@@ -135,12 +135,21 @@ export function ControlPanel({
       </button>
       {model?.meshSimplified && (
         <p style={{ fontSize: 10, color: 'var(--muted)', margin: '6px 0 0' }}>
-          Mesh simplified for performance ({model.vertexCount?.toLocaleString()} verts).
+          Simplified for performance:{' '}
+          {model.initialVertexCount
+            ? `${model.initialVertexCount.toLocaleString()} → ${model.vertexCount?.toLocaleString()}`
+            : model.vertexCount?.toLocaleString()}{' '}
+          verts.
         </p>
       )}
-      {model?.heavyMesh && (
+      {model?.massiveMesh && (
         <p style={{ fontSize: 10, color: 'var(--warn)', margin: '4px 0 0' }}>
-          Large model: visual solver, fewer particles, streamlines off.
+          Very large model: visual flow only (fast). Switch to LBM after import if you need viscous physics.
+        </p>
+      )}
+      {model?.heavyMesh && !model?.massiveMesh && (
+        <p style={{ fontSize: 10, color: 'var(--warn)', margin: '4px 0 0' }}>
+          Large model: visual solver and low particle count for responsiveness.
         </p>
       )}
       <div className="preset-grid" style={{ marginTop: 8 }}>

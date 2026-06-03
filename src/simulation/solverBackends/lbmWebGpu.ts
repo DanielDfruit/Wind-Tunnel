@@ -6,9 +6,22 @@ const Q = 19
 export type GpuLbmStatus = 'unavailable' | 'ready' | 'error'
 
 let device: GPUDevice | null = null
+let adapterLabel = ''
 let initPromise: Promise<GpuLbmStatus> | null = null
 let status: GpuLbmStatus = 'unavailable'
 let statusDetail = ''
+const readyListeners = new Set<() => void>()
+
+/** Fired once when WebGPU device becomes ready (e.g. to rebuild LBM on GPU). */
+export function onWebGpuLbmReady(listener: () => void): () => void {
+  readyListeners.add(listener)
+  if (status === 'ready') listener()
+  return () => readyListeners.delete(listener)
+}
+
+function notifyReady(): void {
+  readyListeners.forEach((fn) => fn())
+}
 
 export function getWebGpuLbmStatus(): { status: GpuLbmStatus; detail: string } {
   return { status, detail: statusDetail }
@@ -38,14 +51,22 @@ export async function ensureWebGpuDevice(): Promise<GpuLbmStatus> {
         status = 'unavailable'
         return status
       }
+      try {
+        const info = await adapter.requestAdapterInfo()
+        adapterLabel = info.device ?? info.description ?? 'GPU'
+      } catch {
+        adapterLabel = 'GPU'
+      }
+      const limits = adapter.limits
       device = await adapter.requestDevice({
         requiredLimits: {
-          maxStorageBufferBindingSize: 256 * 1024 * 1024,
-          maxBufferSize: 256 * 1024 * 1024,
+          maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
+          maxBufferSize: limits.maxBufferSize,
         },
       })
-      statusDetail = 'WebGPU adapter'
+      statusDetail = adapterLabel
       status = 'ready'
+      notifyReady()
       return status
     } catch (e) {
       statusDetail = e instanceof Error ? e.message : 'WebGPU init failed'
@@ -60,14 +81,9 @@ export async function ensureWebGpuDevice(): Promise<GpuLbmStatus> {
 
 const WGSL = /* wgsl */ `
 struct Params {
-  nx: u32,
-  ny: u32,
-  nz: u32,
-  omega: f32,
-  uxIn: f32,
-  uyIn: f32,
-  uzIn: f32,
-  uLattice: f32,
+  dims: vec4<u32>,
+  flow: vec4<f32>,
+  misc: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -101,7 +117,7 @@ const OPP: array<u32, 19> = array<u32, 19>(
 );
 
 fn idx3(i: u32, j: u32, k: u32) -> u32 {
-  return i * params.ny * params.nz + j * params.nz + k;
+  return i * params.dims.y * params.dims.z + j * params.dims.z + k;
 }
 
 fn feq(q: u32, rho: f32, uvx: f32, uvy: f32, uvz: f32) -> f32 {
@@ -111,17 +127,15 @@ fn feq(q: u32, rho: f32, uvx: f32, uvy: f32, uvz: f32) -> f32 {
 }
 
 @compute @workgroup_size(4, 4, 4)
-fn lbm_step(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn lbm_collide(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   let j = gid.y;
   let k = gid.z;
-  if (i >= params.nx || j >= params.ny || k >= params.nz {
+  if (i >= params.dims.x || j >= params.dims.y || k >= params.dims.z) {
     return;
   }
   let id = idx3(i, j, k);
-  let nx = params.nx;
-  let ny = params.ny;
-  let nz = params.nz;
+  let omega = params.flow.x;
 
   if (solid[id] == 1u) {
     for (var q = 0u; q < Q; q++) {
@@ -154,50 +168,81 @@ fn lbm_step(@builtin(global_invocation_id) gid: vec3<u32>) {
   uy[id] = uvy;
   uz[id] = uvz;
 
-  var fColl: array<f32, 19>;
   for (var q = 0u; q < Q; q++) {
     let fe = feq(q, r, uvx, uvy, uvz);
-    fColl[q] = fIn[id * Q + q] - params.omega * (fIn[id * Q + q] - fe);
+    fOut[id * Q + q] = fIn[id * Q + q] - omega * (fIn[id * Q + q] - fe);
+  }
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn lbm_stream(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  let j = gid.y;
+  let k = gid.z;
+  if (i >= params.dims.x || j >= params.dims.y || k >= params.dims.z) {
+    return;
+  }
+  let id = idx3(i, j, k);
+  let nx = params.dims.x;
+  let ny = params.dims.y;
+  let nz = params.dims.z;
+  let uxIn = params.flow.y;
+  let uyIn = params.flow.z;
+  let uzIn = params.flow.w;
+
+  if (solid[id] == 1u) {
+    return;
   }
 
   for (var q = 0u; q < Q; q++) {
-    fOut[id * Q + q] = 0.0;
-  }
-
-  for (var q = 1u; q < Q; q++) {
-    let ii = i32(i) + EX[q];
-    let jj = i32(j) + EY[q];
-    let kk = i32(k) + EZ[q];
-    var fq = fColl[q];
-    if (ii < 0 || jj < 0 || kk < 0 || ii >= i32(nx) || jj >= i32(ny) || kk >= i32(nz)) {
-      fOut[id * Q + q] = fq;
+    let si = i32(i) - EX[q];
+    let sj = i32(j) - EY[q];
+    let sk = i32(k) - EZ[q];
+    if (si < 0 || sj < 0 || sk < 0 || si >= i32(nx) || sj >= i32(ny) || sk >= i32(nz)) {
+      fOut[id * Q + q] = fIn[id * Q + q];
       continue;
     }
-    let ni = u32(ii);
-    let nj = u32(jj);
-    let nk = u32(kk);
-    let nidx = idx3(ni, nj, nk);
-    if (solid[nidx] == 1u) {
-      fOut[id * Q + OPP[q]] = fq;
+    let sid = idx3(u32(si), u32(sj), u32(sk));
+    if (solid[sid] == 1u) {
+      fOut[id * Q + q] = fIn[id * Q + OPP[q]];
     } else {
-      fOut[id * Q + q] = fq;
+      fOut[id * Q + q] = fIn[sid * Q + q];
     }
   }
-  fOut[id * Q] = fColl[0];
 
   if (inlet[id] == 1u) {
     for (var q = 0u; q < Q; q++) {
-      fOut[id * Q + q] = feq(q, 1.0, params.uxIn, params.uyIn, params.uzIn);
+      fOut[id * Q + q] = feq(q, 1.0, uxIn, uyIn, uzIn);
     }
-    ux[id] = params.uxIn;
-    uy[id] = params.uyIn;
-    uz[id] = params.uzIn;
+    ux[id] = uxIn;
+    uy[id] = uyIn;
+    uz[id] = uzIn;
   }
 }
 `
 
+async function createValidatedComputePipeline(
+  dev: GPUDevice,
+  module: GPUShaderModule,
+  layout: GPUBindGroupLayout,
+  entryPoint: string
+): Promise<GPUComputePipeline> {
+  const info = await module.getCompilationInfo()
+  const errors = info.messages.filter((m) => m.type === 'error')
+  if (errors.length > 0) {
+    const text = errors.map((m) => m.message).join('\n')
+    console.error(`[LBM WGSL ${entryPoint}]`, errors)
+    throw new Error(`WGSL compile failed (${entryPoint}): ${text}`)
+  }
+  return dev.createComputePipeline({
+    layout: dev.createPipelineLayout({ bindGroupLayouts: [layout] }),
+    compute: { module, entryPoint },
+  })
+}
+
 export class WebGpuLbmEngine {
-  private pipeline: GPUComputePipeline | null = null
+  private collidePipeline: GPUComputePipeline | null = null
+  private streamPipeline: GPUComputePipeline | null = null
   private bindLayout: GPUBindGroupLayout | null = null
   private solidBuf: GPUBuffer | null = null
   private inletBuf: GPUBuffer | null = null
@@ -225,8 +270,8 @@ export class WebGpuLbmEngine {
     this.n = nx * ny * nz
     const fSize = this.n * Q * 4
 
-    if (!this.pipeline) {
-      const module = dev.createShaderModule({ code: WGSL })
+    if (!this.collidePipeline || !this.streamPipeline) {
+      const module = dev.createShaderModule({ code: WGSL, label: 'lbm-d3q19' })
       const layoutEntries: GPUBindGroupLayoutEntry[] = [
         { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
@@ -239,10 +284,8 @@ export class WebGpuLbmEngine {
         { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
       ]
       this.bindLayout = dev.createBindGroupLayout({ entries: layoutEntries })
-      this.pipeline = dev.createComputePipeline({
-        layout: dev.createPipelineLayout({ bindGroupLayouts: [this.bindLayout] }),
-        compute: { module, entryPoint: 'lbm_step' },
-      })
+      this.collidePipeline = await createValidatedComputePipeline(dev, module, this.bindLayout, 'lbm_collide')
+      this.streamPipeline = await createValidatedComputePipeline(dev, module, this.bindLayout, 'lbm_stream')
     }
 
     const destroy = (b: GPUBuffer | null) => b?.destroy()
@@ -272,7 +315,7 @@ export class WebGpuLbmEngine {
     const fInit = this.buildInitialF(grid, uLattice)
     dev.queue.writeBuffer(this.fA, 0, fInit.buffer, fInit.byteOffset, fInit.byteLength)
 
-    this.paramsBuf = dev.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+    this.paramsBuf = dev.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     writeParamsUniform(dev, this.paramsBuf, nx, ny, nz, 1 / tau, wind.x * uLattice, wind.y * uLattice, wind.z * uLattice, uLattice)
 
     this.readUx = new Float32Array(this.n)
@@ -318,18 +361,16 @@ export class WebGpuLbmEngine {
 
   async runSteps(steps: number): Promise<void> {
     const dev = device
-    if (!dev || !this.pipeline || !this.bindLayout || !this.grid) return
+    if (!dev || !this.collidePipeline || !this.streamPipeline || !this.bindLayout || !this.grid) return
 
     const { nx, ny, nz } = this.grid
     const wgX = Math.ceil(nx / 4)
     const wgY = Math.ceil(ny / 4)
     const wgZ = Math.ceil(nz / 4)
 
-    for (let s = 0; s < steps; s++) {
-      const fIn = this.pingA ? this.fA! : this.fB!
-      const fOut = this.pingA ? this.fB! : this.fA!
-      const bind = dev.createBindGroup({
-        layout: this.bindLayout,
+    const makeBind = (fIn: GPUBuffer, fOut: GPUBuffer) =>
+      dev.createBindGroup({
+        layout: this.bindLayout!,
         entries: [
           { binding: 0, resource: { buffer: this.paramsBuf! } },
           { binding: 1, resource: { buffer: this.solidBuf! } },
@@ -342,14 +383,25 @@ export class WebGpuLbmEngine {
           { binding: 8, resource: { buffer: this.uzBuf! } },
         ],
       })
+
+    for (let s = 0; s < steps; s++) {
+      const fIn = this.pingA ? this.fA! : this.fB!
+      const fMid = this.pingA ? this.fB! : this.fA!
       const enc = dev.createCommandEncoder()
-      const pass = enc.beginComputePass()
-      pass.setPipeline(this.pipeline)
-      pass.setBindGroup(0, bind)
-      pass.dispatchWorkgroups(wgX, wgY, wgZ)
-      pass.end()
+
+      const collidePass = enc.beginComputePass()
+      collidePass.setPipeline(this.collidePipeline)
+      collidePass.setBindGroup(0, makeBind(fIn, fMid))
+      collidePass.dispatchWorkgroups(wgX, wgY, wgZ)
+      collidePass.end()
+
+      const streamPass = enc.beginComputePass()
+      streamPass.setPipeline(this.streamPipeline)
+      streamPass.setBindGroup(0, makeBind(fMid, fIn))
+      streamPass.dispatchWorkgroups(wgX, wgY, wgZ)
+      streamPass.end()
+
       dev.queue.submit([enc.finish()])
-      this.pingA = !this.pingA
     }
     await dev.queue.onSubmittedWorkDone()
   }
@@ -395,16 +447,16 @@ function writeParamsUniform(
   uzIn: number,
   uLattice: number
 ): void {
-  const raw = new ArrayBuffer(32)
+  const raw = new ArrayBuffer(48)
   const u32 = new Uint32Array(raw)
   const f32 = new Float32Array(raw)
   u32[0] = nx
   u32[1] = ny
   u32[2] = nz
-  f32[3] = omega
-  f32[4] = uxIn
-  f32[5] = uyIn
-  f32[6] = uzIn
-  f32[7] = uLattice
+  f32[4] = omega
+  f32[5] = uxIn
+  f32[6] = uyIn
+  f32[7] = uzIn
+  f32[8] = uLattice
   dev.queue.writeBuffer(buf, 0, raw)
 }

@@ -62,7 +62,7 @@ export default function App() {
       </div>
       {importLoading && (
         <div className="export-overlay">
-          <p>Loading model and building flow field…</p>
+          <p>Loading model… large files are simplified automatically for performance.</p>
         </div>
       )}
       {exporting && (

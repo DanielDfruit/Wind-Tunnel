@@ -34,7 +34,7 @@ export class LBMSolver implements FlowSolverBackend {
   private usingGpu = false
   private refineTick = 0
   private gpuRefineInFlight = false
-  private readonly gpuReadbackEvery = 6
+  private readonly gpuReadbackEvery = 10
 
   private grid: ObstacleGrid | null = null
   private f = new Float32Array(0)
@@ -95,21 +95,33 @@ export class LBMSolver implements FlowSolverBackend {
 
     await ensureWebGpuDevice()
     if (isWebGpuLbmReady()) {
-      this.gpu = this.gpu ?? new WebGpuLbmEngine()
-      const ok = await this.gpu.setup(this.grid, this.tau, this.uLattice)
-      if (ok) {
-        await this.gpu.runSteps(this.pendingWarmup)
-        const macro = await this.gpu.readMacroscopic()
-        this.ux = Float32Array.from(macro.ux)
-        this.uy = Float32Array.from(macro.uy)
-        this.uz = Float32Array.from(macro.uz)
-        this.rho = Float32Array.from(macro.rho)
-        this.usingGpu = true
-        this.description = 'Viscous D3Q19 LBM on GPU (WebGPU) — ρ and μ from environment'
-        this.refineTick = 0
-        this.estimateDrag(rhoAir)
-        this.ready = true
-        return
+      try {
+        this.gpu = this.gpu ?? new WebGpuLbmEngine()
+        const ok = await this.gpu.setup(this.grid, this.tau, this.uLattice)
+        if (ok) {
+          const warmupNow = Math.min(this.pendingWarmup, 48)
+          await this.gpu.runSteps(warmupNow)
+          const macro = await this.gpu.readMacroscopic()
+          if (this.ux.length !== macro.ux.length) this.ux = new Float32Array(macro.ux.length)
+          if (this.uy.length !== macro.uy.length) this.uy = new Float32Array(macro.uy.length)
+          if (this.uz.length !== macro.uz.length) this.uz = new Float32Array(macro.uz.length)
+          if (this.rho.length !== macro.rho.length) this.rho = new Float32Array(macro.rho.length)
+          this.ux.set(macro.ux)
+          this.uy.set(macro.uy)
+          this.uz.set(macro.uz)
+          this.rho.set(macro.rho)
+          void this.finishGpuWarmup(warmupNow, rhoAir)
+          this.usingGpu = true
+          this.description = 'Viscous D3Q19 LBM on GPU (WebGPU) — ρ and μ from environment'
+          this.refineTick = 0
+          this.estimateDrag(rhoAir)
+          this.ready = true
+          return
+        }
+      } catch (e) {
+        console.warn('[LBM] WebGPU setup/run failed, using CPU:', e)
+        this.usingGpu = false
+        this.gpu = null
       }
     }
 
@@ -140,8 +152,28 @@ export class LBMSolver implements FlowSolverBackend {
       this.uz = new Float32Array(n)
     }
     this.initUniform(this.grid.wind)
-    for (let s = 0; s < this.pendingWarmup; s++) this.step(this.grid)
+    const warmupNow = Math.min(this.pendingWarmup, 72)
+    for (let s = 0; s < warmupNow; s++) this.step(this.grid)
     this.estimateDrag(rhoAir)
+  }
+
+  /** Continue LBM warmup on GPU without blocking the first ready frame. */
+  private async finishGpuWarmup(done: number, rhoAir: number): Promise<void> {
+    const remaining = this.pendingWarmup - done
+    if (remaining <= 0 || !this.gpu) return
+    const chunk = 20
+    for (let left = remaining; left > 0; left -= chunk) {
+      await this.gpu.runSteps(Math.min(chunk, left))
+      this.refineTick++
+      if (this.refineTick % this.gpuReadbackEvery === 0) {
+        const macro = await this.gpu.readMacroscopic()
+        this.ux.set(macro.ux)
+        this.uy.set(macro.uy)
+        this.uz.set(macro.uz)
+        this.rho.set(macro.rho)
+      }
+      this.estimateDrag(rhoAir)
+    }
   }
 
   private pendingNx = 22
@@ -173,12 +205,12 @@ export class LBMSolver implements FlowSolverBackend {
       if (!this.gpu || !this.grid) return
       await this.gpu.runSteps(iterations)
       this.refineTick++
-      if (this.refineTick % this.gpuReadbackEvery === 0) {
+      if (this.ux.length > 0 && this.refineTick % this.gpuReadbackEvery === 0) {
         const macro = await this.gpu.readMacroscopic()
-        this.ux = Float32Array.from(macro.ux)
-        this.uy = Float32Array.from(macro.uy)
-        this.uz = Float32Array.from(macro.uz)
-        this.rho = Float32Array.from(macro.rho)
+        this.ux.set(macro.ux)
+        this.uy.set(macro.uy)
+        this.uz.set(macro.uz)
+        this.rho.set(macro.rho)
       }
     } finally {
       this.gpuRefineInFlight = false

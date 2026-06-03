@@ -9,7 +9,7 @@ import {
   computeObjectBounds,
   estimateFrontalAreaProxy,
 } from './geometry'
-import { optimizeImportedMeshes } from './meshOptimize'
+import { optimizeImportedMeshes, simplifyParsedGeometry } from './meshOptimize'
 import type { LoadedModel } from '../types/simulationTypes'
 
 function applyDefaultMaterial(object: THREE.Object3D): void {
@@ -73,10 +73,11 @@ export async function loadModelFromBuffer(
   let object: THREE.Object3D
 
   if (format === 'stl') {
-    const geometry = new STLLoader().parse(data)
+    let geometry = new STLLoader().parse(data)
     if (!geometry.attributes.position?.count) {
       throw new Error('STL file is empty or invalid')
     }
+    geometry = simplifyParsedGeometry(geometry)
     geometry.computeVertexNormals()
     object = new THREE.Mesh(
       geometry,
@@ -114,8 +115,11 @@ function prepareModel(object: THREE.Object3D): LoadedModel {
     characteristicLength: bounds.characteristicLength,
     frontalAreaProxy,
     vertexCount: optimized.vertexCount,
+    initialVertexCount: optimized.initialVertexCount,
     meshSimplified: optimized.simplified,
     heavyMesh: optimized.heavy,
+    massiveMesh: optimized.massive,
+    importTier: optimized.tier,
   }
 }
 

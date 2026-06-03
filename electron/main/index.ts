@@ -29,6 +29,8 @@ app.setPath('userData', join(cacheRoot, 'userData'))
 app.commandLine.appendSwitch('disk-cache-dir', join(cacheRoot, 'disk-cache'))
 app.commandLine.appendSwitch('gpu-disk-cache-dir', join(cacheRoot, 'gpu-cache'))
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+app.commandLine.appendSwitch('enable-features', 'WebGPU')
+app.commandLine.appendSwitch('enable-unsafe-webgpu')
 
 const singleInstance = app.requestSingleInstanceLock()
 if (!singleInstance) {

@@ -7,6 +7,7 @@ import {
   ensureWebGpuDevice,
   getWebGpuLbmStatus,
   isWebGpuLbmReady,
+  onWebGpuLbmReady,
 } from './lbmWebGpu'
 import { OpenFoamStubSolver } from './openFoamStub'
 import { PotentialFlowSolver } from './potentialFlowSolver'
@@ -78,11 +79,37 @@ function lbmGridGpu(quality: VizQuality): { nx: number; ny: number; nz: number; 
   }
 }
 
-function lbmGridForQuality(quality: VizQuality): { nx: number; ny: number; nz: number; warmup: number } {
-  return isWebGpuLbmReady() ? lbmGridGpu(quality) : lbmGridCpu(quality)
+function lbmGridForQuality(
+  quality: VizQuality,
+  importLoad: 'std' | 'heavy' | 'massive' = 'std'
+): { nx: number; ny: number; nz: number; warmup: number } {
+  const g = isWebGpuLbmReady() ? lbmGridGpu(quality) : lbmGridCpu(quality)
+  if (importLoad === 'std') return g
+  const scale = importLoad === 'massive' ? 0.72 : isWebGpuLbmReady() ? 0.82 : 0.88
+  const warmupScale = importLoad === 'massive' ? 0.25 : 0.35
+  return {
+    nx: Math.max(14, Math.floor(g.nx * scale)),
+    ny: Math.max(10, Math.floor(g.ny * scale)),
+    nz: Math.max(14, Math.floor(g.nz * scale)),
+    warmup: Math.max(24, Math.floor(g.warmup * warmupScale)),
+  }
 }
 
-export { ensureWebGpuDevice, getWebGpuLbmStatus, isWebGpuLbmReady }
+export function isFlowSolverBusy(): boolean {
+  return rebuildQueued || rebuildInFlight
+}
+
+export { ensureWebGpuDevice, getWebGpuLbmStatus, isWebGpuLbmReady, onWebGpuLbmReady }
+
+/** Bumped when WebGPU becomes ready so the viewport invalidates the LBM rebuild signature. */
+let lbmGpuGeneration = 0
+export function getLbmGpuGeneration(): number {
+  return lbmGpuGeneration
+}
+
+onWebGpuLbmReady(() => {
+  lbmGpuGeneration++
+})
 
 export function getLbmComputeLabel(): string {
   if (activeMode !== 'lbm') return ''
@@ -92,6 +119,8 @@ export function getLbmComputeLabel(): string {
   }
   const { status, detail } = getWebGpuLbmStatus()
   if (status === 'ready' && !lbmSolver.ready) return 'WebGPU (initializing…)'
+  if (status === 'ready') return 'CPU fallback (WebGPU ok — rebuild or retry)'
+  if (status === 'error') return detail ? `CPU fallback (${detail})` : 'CPU fallback (WebGPU error)'
   return detail ? `CPU fallback (${detail})` : 'CPU fallback'
 }
 
@@ -140,7 +169,8 @@ export async function rebuildFlowSolver(
   wind: THREE.Vector3,
   baseSpeed: number,
   vizQuality: VizQuality,
-  fluid?: FluidProperties
+  fluid?: FluidProperties,
+  importLoad: 'std' | 'heavy' | 'massive' = 'std'
 ): Promise<void> {
   const solver = getActiveSolver()
   if (solver.id === 'potential') {
@@ -148,7 +178,8 @@ export async function rebuildFlowSolver(
     potentialSolver.setGridResolution(g.nx, g.ny, g.nz)
   }
   if (solver.id === 'lbm') {
-    const g = lbmGridForQuality(vizQuality)
+    await ensureWebGpuDevice()
+    const g = lbmGridForQuality(vizQuality, importLoad)
     lbmSolver.configureGrid(g.nx, g.ny, g.nz, g.warmup)
   }
   const domain = paddedBox(modelBox, 2.4)
@@ -171,7 +202,8 @@ export function scheduleFlowSolverRebuild(
   baseSpeed: number,
   vizQuality: VizQuality,
   fluid?: FluidProperties,
-  onDone?: () => void
+  onDone?: () => void,
+  importLoad: 'std' | 'heavy' | 'massive' = 'std'
 ): void {
   const run = () => {
     if (rebuildInFlight) {
@@ -182,7 +214,7 @@ export function scheduleFlowSolverRebuild(
     rebuildInFlight = true
     void (async () => {
       try {
-        await rebuildFlowSolver(object, modelBox, wind, baseSpeed, vizQuality, fluid)
+        await rebuildFlowSolver(object, modelBox, wind, baseSpeed, vizQuality, fluid, importLoad)
         onDone?.()
       } finally {
         rebuildQueued = false
@@ -200,9 +232,9 @@ export function scheduleFlowSolverRebuild(
   }
 
   if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(run, { timeout: 200 })
+    requestIdleCallback(run, { timeout: 800 })
   } else {
-    setTimeout(run, 0)
+    setTimeout(run, 32)
   }
 }
 
@@ -212,7 +244,7 @@ export function refineFlowSolver(iterations: number): void {
 }
 
 export function refineFlowSolverLive(iterations: number): void {
-  if (rebuildQueued || rebuildInFlight) return
+  if (rebuildQueued || rebuildInFlight || iterations <= 0) return
   const id = getActiveSolver().id
   if (id === 'lbm' || id === 'potential') refineFlowSolver(iterations)
 }
