@@ -8,6 +8,7 @@ import {
   centerObject,
   characteristicLength,
   boxToEdgePositions,
+  paddedBox,
   collectVisibleMeshes,
   computeWorldBounds,
   frontalAreaProxy,
@@ -296,7 +297,7 @@ function StreamlineLines({ particlesRef }: { particlesRef: React.RefObject<Parti
   useFrame(() => {
     const line = ref.current;
     const particles = particlesRef.current;
-    if (!line || !particles.length) return;
+    if (!line || !particles || !particles.length) return;
 
     let ptr = 0;
     let drawn = 0;
