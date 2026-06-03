@@ -1,4 +1,5 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { ensureWebGpuDevice } from './simulation/solverBackends';
 import { TopBar } from './components/TopBar';
 import { ControlPanel } from './components/ControlPanel';
 import { Viewport3D } from './components/Viewport3D';
@@ -10,6 +11,12 @@ import './styles/global.css';
 import './styles/app.css';
 
 export default function App() {
+  const refreshSolverInfo = useSimulationStore((s) => s.refreshSolverInfo);
+
+  useEffect(() => {
+    void ensureWebGpuDevice().then(() => refreshSolverInfo());
+  }, [refreshSolverInfo]);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const resetViewRef = useRef<(() => void) | null>(null);
   const frameViewRef = useRef<(() => void) | null>(null);

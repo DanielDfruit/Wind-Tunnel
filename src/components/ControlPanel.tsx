@@ -105,6 +105,11 @@ export function ControlPanel({
           ? ' — building flow grid…'
           : ''}
       </p>
+      {solverMode === 'lbm' && solverInfo.computeBackend && (
+        <p style={{ fontSize: 10, color: 'var(--accent)', margin: '4px 0 0' }}>
+          Compute: {solverInfo.computeBackend}
+        </p>
+      )}
 
       <div className="section-title">Demo Objects</div>
       <div className="preset-grid">

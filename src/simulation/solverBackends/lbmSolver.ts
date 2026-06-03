@@ -100,10 +100,10 @@ export class LBMSolver implements FlowSolverBackend {
       if (ok) {
         await this.gpu.runSteps(this.pendingWarmup)
         const macro = await this.gpu.readMacroscopic()
-        this.ux = macro.ux
-        this.uy = macro.uy
-        this.uz = macro.uz
-        this.rho = macro.rho
+        this.ux = Float32Array.from(macro.ux)
+        this.uy = Float32Array.from(macro.uy)
+        this.uz = Float32Array.from(macro.uz)
+        this.rho = Float32Array.from(macro.rho)
         this.usingGpu = true
         this.description = 'Viscous D3Q19 LBM on GPU (WebGPU) — ρ and μ from environment'
         this.refineTick = 0
@@ -175,10 +175,10 @@ export class LBMSolver implements FlowSolverBackend {
       this.refineTick++
       if (this.refineTick % this.gpuReadbackEvery === 0) {
         const macro = await this.gpu.readMacroscopic()
-        this.ux = macro.ux
-        this.uy = macro.uy
-        this.uz = macro.uz
-        this.rho = macro.rho
+        this.ux = Float32Array.from(macro.ux)
+        this.uy = Float32Array.from(macro.uy)
+        this.uz = Float32Array.from(macro.uz)
+        this.rho = Float32Array.from(macro.rho)
       }
     } finally {
       this.gpuRefineInFlight = false

@@ -3,6 +3,11 @@ import type { VizQuality } from '../../types/simulationTypes'
 import { paddedBox } from '../../utils/geometry'
 import { ApproximateVisualSolver } from './approximateSolver'
 import { LBMSolver } from './lbmSolver'
+import {
+  ensureWebGpuDevice,
+  getWebGpuLbmStatus,
+  isWebGpuLbmReady,
+} from './lbmWebGpu'
 import { OpenFoamStubSolver } from './openFoamStub'
 import { PotentialFlowSolver } from './potentialFlowSolver'
 import type {
@@ -43,7 +48,7 @@ function gridForQuality(quality: VizQuality): { nx: number; ny: number; nz: numb
   }
 }
 
-function lbmGridForQuality(quality: VizQuality): { nx: number; ny: number; nz: number; warmup: number } {
+function lbmGridCpu(quality: VizQuality): { nx: number; ny: number; nz: number; warmup: number } {
   switch (quality) {
     case 'low':
       return { nx: 18, ny: 14, nz: 18, warmup: 160 }
@@ -56,6 +61,38 @@ function lbmGridForQuality(quality: VizQuality): { nx: number; ny: number; nz: n
     default:
       return { nx: 22, ny: 16, nz: 22, warmup: 220 }
   }
+}
+
+function lbmGridGpu(quality: VizQuality): { nx: number; ny: number; nz: number; warmup: number } {
+  switch (quality) {
+    case 'low':
+      return { nx: 24, ny: 18, nz: 24, warmup: 120 }
+    case 'medium':
+      return { nx: 32, ny: 22, nz: 32, warmup: 160 }
+    case 'high':
+      return { nx: 40, ny: 26, nz: 40, warmup: 200 }
+    case 'ultra':
+      return { nx: 48, ny: 30, nz: 48, warmup: 240 }
+    default:
+      return { nx: 32, ny: 22, nz: 32, warmup: 160 }
+  }
+}
+
+function lbmGridForQuality(quality: VizQuality): { nx: number; ny: number; nz: number; warmup: number } {
+  return isWebGpuLbmReady() ? lbmGridGpu(quality) : lbmGridCpu(quality)
+}
+
+export { ensureWebGpuDevice, getWebGpuLbmStatus, isWebGpuLbmReady }
+
+export function getLbmComputeLabel(): string {
+  if (activeMode !== 'lbm') return ''
+  if (lbmSolver.isUsingGpu()) {
+    const { detail } = getWebGpuLbmStatus()
+    return detail ? `WebGPU (${detail})` : 'WebGPU'
+  }
+  const { status, detail } = getWebGpuLbmStatus()
+  if (status === 'ready' && !lbmSolver.ready) return 'WebGPU (initializing…)'
+  return detail ? `CPU fallback (${detail})` : 'CPU fallback'
 }
 
 export function getSolverMode(): SolverMode {
@@ -82,8 +119,11 @@ export function getSolverInfo(): SolverInfo {
   if (s.id === 'openfoam' && openFoamSolver instanceof OpenFoamStubSolver) {
     info.statusNote = openFoamSolver.statusNote
   }
-  if (s.id === 'lbm' && !s.ready) {
-    info.statusNote = 'Building viscous flow field…'
+  if (s.id === 'lbm') {
+    info.computeBackend = getLbmComputeLabel()
+    if (!s.ready) {
+      info.statusNote = 'Building viscous flow field…'
+    }
   }
   return info
 }
@@ -94,14 +134,14 @@ export function getSolverDragEstimate(): { cd: number; dragForce: number } | nul
   return lbmSolver.getEstimatedCoefficients()
 }
 
-export function rebuildFlowSolver(
+export async function rebuildFlowSolver(
   object: THREE.Object3D,
   modelBox: THREE.Box3,
   wind: THREE.Vector3,
   baseSpeed: number,
   vizQuality: VizQuality,
   fluid?: FluidProperties
-): void {
+): Promise<void> {
   const solver = getActiveSolver()
   if (solver.id === 'potential') {
     const g = gridForQuality(vizQuality)
@@ -112,10 +152,15 @@ export function rebuildFlowSolver(
     lbmSolver.configureGrid(g.nx, g.ny, g.nz, g.warmup)
   }
   const domain = paddedBox(modelBox, 2.4)
-  solver.rebuildFromObject(object, domain, wind, baseSpeed, fluid)
+  if (solver.id === 'lbm') {
+    await lbmSolver.rebuildFromObjectAsync(object, domain, wind, baseSpeed, fluid)
+  } else {
+    solver.rebuildFromObject(object, domain, wind, baseSpeed, fluid)
+  }
 }
 
 let rebuildQueued = false
+let rebuildInFlight = false
 let pendingRebuild: (() => void) | null = null
 
 /** Run heavy grid rebuild off the render hot path so imports stay responsive. */
@@ -129,19 +174,27 @@ export function scheduleFlowSolverRebuild(
   onDone?: () => void
 ): void {
   const run = () => {
-    rebuildQueued = true
-    try {
-      rebuildFlowSolver(object, modelBox, wind, baseSpeed, vizQuality, fluid)
-      onDone?.()
-    } finally {
-      rebuildQueued = false
-      const next = pendingRebuild
-      pendingRebuild = null
-      if (next) next()
+    if (rebuildInFlight) {
+      pendingRebuild = run
+      return
     }
+    rebuildQueued = true
+    rebuildInFlight = true
+    void (async () => {
+      try {
+        await rebuildFlowSolver(object, modelBox, wind, baseSpeed, vizQuality, fluid)
+        onDone?.()
+      } finally {
+        rebuildQueued = false
+        rebuildInFlight = false
+        const next = pendingRebuild
+        pendingRebuild = null
+        if (next) next()
+      }
+    })()
   }
 
-  if (rebuildQueued) {
+  if (rebuildQueued || rebuildInFlight) {
     pendingRebuild = run
     return
   }
@@ -154,12 +207,12 @@ export function scheduleFlowSolverRebuild(
 }
 
 export function refineFlowSolver(iterations: number): void {
-  if (rebuildQueued) return
+  if (rebuildQueued || rebuildInFlight) return
   getActiveSolver().refine(iterations)
 }
 
 export function refineFlowSolverLive(iterations: number): void {
-  if (rebuildQueued) return
+  if (rebuildQueued || rebuildInFlight) return
   const id = getActiveSolver().id
   if (id === 'lbm' || id === 'potential') refineFlowSolver(iterations)
 }

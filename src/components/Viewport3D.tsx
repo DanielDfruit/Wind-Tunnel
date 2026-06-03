@@ -17,7 +17,11 @@ import {
 } from '../utils/geometry';
 import { airSpeedToMs, particleCountForQuality } from '../utils/units';
 import { createParticles, stepParticles, type Particle } from '../simulation/particleSystem';
-import { scheduleFlowSolverRebuild, refineFlowSolverLive } from '../simulation/solverBackends';
+import {
+  ensureWebGpuDevice,
+  scheduleFlowSolverRebuild,
+  refineFlowSolverLive,
+} from '../simulation/solverBackends';
 import { toArrayBuffer } from '../utils/binary';
 import { detectFormat, loadModelFromBuffer } from '../utils/modelLoader';
 import { fitCameraToObject, setCameraViewPreset, type CameraViewPreset } from '../utils/camera';
@@ -412,6 +416,16 @@ function SceneInner({
   }, [importPayload?.loadId]);
 
   const windVec = useMemo(() => windFromYawPitch(wind.yaw, wind.pitch), [wind.yaw, wind.pitch]);
+
+  useEffect(() => {
+    void ensureWebGpuDevice().then((st) => {
+      if (st === 'ready') {
+        solverSigRef.current = '';
+        refreshSolverInfo();
+      }
+    });
+  }, [refreshSolverInfo]);
+
   const fluid = useMemo(
     () => ({ density: env.airDensity, dynamicViscosity: env.dynamicViscosity }),
     [env.airDensity, env.dynamicViscosity]
@@ -737,6 +751,9 @@ export function Viewport3D({
         onCreated={({ gl }) => {
           gl.setClearColor('#0a0e14');
           canvasRef.current = gl.domElement;
+          void ensureWebGpuDevice().then(() => {
+            useSimulationStore.getState().refreshSolverInfo();
+          });
         }}
       >
         <SceneInner

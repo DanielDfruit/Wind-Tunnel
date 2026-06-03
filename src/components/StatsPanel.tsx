@@ -32,7 +32,14 @@ export function StatsPanel() {
     <aside className="panel panel-right">
       <div className="section-title">Live Statistics</div>
       <p style={{ fontSize: 10, color: 'var(--warn)', margin: '0 0 4px' }}>{disclaimer}</p>
-      <p style={{ fontSize: 10, color: 'var(--muted)', margin: '0 0 8px' }}>{solverInfo.label}</p>
+      <p style={{ fontSize: 10, color: 'var(--muted)', margin: '0 0 4px' }}>{solverInfo.label}</p>
+      {solverInfo.id === 'lbm' && solverInfo.computeBackend ? (
+        <p style={{ fontSize: 10, color: 'var(--accent)', margin: '0 0 8px' }}>
+          Compute: {solverInfo.computeBackend}
+        </p>
+      ) : (
+        <div style={{ marginBottom: 8 }} />
+      )}
       <StatCard label="Air Speed" value={formatSpeed(stats.airSpeedMs, env.speedUnit)} />
       <StatCard label="Reynolds Number" value={stats.reynolds.toFixed(0)} />
       <StatCard label="Dynamic Pressure" value={stats.dynamicPressure.toFixed(2)} unit="Pa" />

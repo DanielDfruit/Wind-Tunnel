@@ -227,19 +227,18 @@ export class WebGpuLbmEngine {
 
     if (!this.pipeline) {
       const module = dev.createShaderModule({ code: WGSL })
-      this.bindLayout = dev.createBindGroupLayout({
-        entries: [
-          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-          { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-          { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-          { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-          { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-          { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-          { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-          { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        ],
-      })
+      const layoutEntries: GPUBindGroupLayoutEntry[] = [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      ]
+      this.bindLayout = dev.createBindGroupLayout({ entries: layoutEntries })
       this.pipeline = dev.createComputePipeline({
         layout: dev.createPipelineLayout({ bindGroupLayouts: [this.bindLayout] }),
         compute: { module, entryPoint: 'lbm_step' },
@@ -271,7 +270,7 @@ export class WebGpuLbmEngine {
     dev.queue.writeBuffer(this.inletBuf, 0, inletU32)
 
     const fInit = this.buildInitialF(grid, uLattice)
-    dev.queue.writeBuffer(this.fA, 0, fInit)
+    dev.queue.writeBuffer(this.fA, 0, fInit.buffer, fInit.byteOffset, fInit.byteLength)
 
     this.paramsBuf = dev.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     writeParamsUniform(dev, this.paramsBuf, nx, ny, nz, 1 / tau, wind.x * uLattice, wind.y * uLattice, wind.z * uLattice, uLattice)
@@ -363,8 +362,8 @@ export class WebGpuLbmEngine {
     const enc = dev.createCommandEncoder()
     enc.copyBufferToBuffer(this.uxBuf!, 0, stage, 0, nBytes)
     enc.copyBufferToBuffer(this.uyBuf!, 0, stage, nBytes, nBytes)
-    enc.copyBufferToBuffer(this.uzBuf!, 0, stage, nBytes, nBytes * 2)
-    enc.copyBufferToBuffer(this.rhoBuf!, 0, stage, nBytes, nBytes * 3)
+    enc.copyBufferToBuffer(this.uzBuf!, 0, stage, nBytes * 2, nBytes)
+    enc.copyBufferToBuffer(this.rhoBuf!, 0, stage, nBytes * 3, nBytes)
     dev.queue.submit([enc.finish()])
     await stage.mapAsync(GPUMapMode.READ)
 
